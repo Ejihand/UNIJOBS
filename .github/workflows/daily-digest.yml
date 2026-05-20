@@ -15,7 +15,7 @@ concurrency:
 jobs:
   send-digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -52,7 +52,7 @@ jobs:
           SMTP_HOST: smtp.gmail.com
           SMTP_PORT: "587"
           UNJOBS_URL: https://unjobs.org/new
-          MAX_PAGES: "6"
+          MAX_PAGES: "20"
           MAX_DETAIL_FETCHES: "50"
           REQUEST_DELAY_SECONDS: "0.5"
           STATE_PATH: data/seen_jobs.json

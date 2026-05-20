@@ -1398,7 +1398,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=int(os.environ.get("MAX_PAGES", "6")),
+        default=int(os.environ.get("MAX_PAGES", "20")),
         help="Maximum listing pages to fetch.",
     )
     parser.add_argument(
