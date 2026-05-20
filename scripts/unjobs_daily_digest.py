@@ -48,7 +48,7 @@ DEFAULT_HEADERS: Dict[str, str] = {
     "Connection": "keep-alive",
 }
 
-# Groups A / B / C — union match: any phrase anywhere in searched text matches.
+# Health-focused keyword groups (primary match).
 KEYWORD_PHRASES: Dict[str, List[str]] = {
     "A": [
         "medical laboratory",
@@ -65,6 +65,15 @@ KEYWORD_PHRASES: Dict[str, List[str]] = {
         "surveillance",
         "outbreak",
         "immunization",
+        "health officer",
+        "health emergency",
+        "mental health",
+        "nutrition",
+        "vaccination",
+        "malaria",
+        "tuberculosis",
+        "hiv",
+        "infectious disease",
     ],
     "C": [
         "ai evaluation",
@@ -75,31 +84,312 @@ KEYWORD_PHRASES: Dict[str, List[str]] = {
         "digital health",
         "health data",
         "bioinformatics",
-        "machine learning",
-        "deep learning",
-        "large language",
-        "llm",
-        "natural language",
-        "nlp",
-        "responsible ai",
-        "algorithm impact",
-        "performance evaluation",
-        "benchmark",
     ],
 }
 
+# Generic IT / software roles are dropped unless an allowed tech exception appears.
+TECH_JOB_PHRASES: List[str] = [
+    "software engineer",
+    "software developer",
+    "software and database",
+    "database development",
+    "database developer",
+    "associate software",
+    "full stack",
+    "full-stack",
+    "backend developer",
+    "frontend developer",
+    "web developer",
+    "devops",
+    "systems administrator",
+    "system administrator",
+    "network engineer",
+    "cyber security",
+    "cybersecurity",
+    "information technology",
+    " IT ",
+    "erp oracle",
+    "oracle functional",
+    "oracle technical",
+    "cloud engineer",
+    "data engineer",
+    "programmer",
+    "machine learning engineer",
+    "deep learning",
+    "computer scientist",
+    "ICT ",
+    "informatics officer",
+]
 
-def _flatten_keywords_sorted() -> List[str]:
-    """Longer phrases first so substrings do not steal matches."""
+# Tech postings are kept only when the text explicitly mentions these roles/topics.
+TECH_ALLOWED_EXCEPTIONS: List[str] = [
+    "ai evaluation",
+    "qa engineer",
+    "quality assurance engineer",
+]
+
+# African countries / territories commonly used on UNjobs duty-station lines.
+AFRICAN_COUNTRIES: frozenset[str] = frozenset(
+    {
+        "algeria",
+        "angola",
+        "benin",
+        "botswana",
+        "burkina faso",
+        "burundi",
+        "cabo verde",
+        "cameroon",
+        "cape verde",
+        "central african republic",
+        "chad",
+        "comoros",
+        "congo",
+        "cote d'ivoire",
+        "côte d'ivoire",
+        "democratic republic of the congo",
+        "djibouti",
+        "egypt",
+        "equatorial guinea",
+        "eritrea",
+        "eswatini",
+        "ethiopia",
+        "gabon",
+        "gambia",
+        "ghana",
+        "guinea",
+        "guinea-bissau",
+        "kenya",
+        "lesotho",
+        "liberia",
+        "libya",
+        "madagascar",
+        "malawi",
+        "mali",
+        "mauritania",
+        "mauritius",
+        "morocco",
+        "mozambique",
+        "namibia",
+        "niger",
+        "nigeria",
+        "rwanda",
+        "sao tome and principe",
+        "senegal",
+        "seychelles",
+        "sierra leone",
+        "somalia",
+        "south africa",
+        "south sudan",
+        "sudan",
+        "swaziland",
+        "tanzania",
+        "togo",
+        "tunisia",
+        "uganda",
+        "zambia",
+        "zimbabwe",
+        "the gambia",
+        "drc",
+    }
+)
+
+# Asia — always discarded (not in scope).
+ASIAN_COUNTRIES: frozenset[str] = frozenset(
+    {
+        "afghanistan",
+        "armenia",
+        "azerbaijan",
+        "bahrain",
+        "bangladesh",
+        "bhutan",
+        "brunei",
+        "brunei darussalam",
+        "cambodia",
+        "china",
+        "georgia",
+        "india",
+        "indonesia",
+        "iran",
+        "iraq",
+        "israel",
+        "japan",
+        "jordan",
+        "kazakhstan",
+        "kuwait",
+        "kyrgyzstan",
+        "laos",
+        "lao pdr",
+        "lebanon",
+        "malaysia",
+        "maldives",
+        "mongolia",
+        "myanmar",
+        "nepal",
+        "north korea",
+        "oman",
+        "pakistan",
+        "palestine",
+        "philippines",
+        "qatar",
+        "republic of korea",
+        "saudi arabia",
+        "singapore",
+        "south korea",
+        "sri lanka",
+        "syria",
+        "taiwan",
+        "tajikistan",
+        "thailand",
+        "timor-leste",
+        "turkey",
+        "türkiye",
+        "turkmenistan",
+        "united arab emirates",
+        "uzbekistan",
+        "vietnam",
+        "viet nam",
+        "yemen",
+    }
+)
+
+ASIAN_LOCATION_HINTS: List[str] = sorted(
+    {
+        "bangkok",
+        "beijing",
+        "dhaka",
+        "hanoi",
+        "ho chi minh",
+        "hong kong",
+        "islamabad",
+        "jakarta",
+        "kathmandu",
+        "kuala lumpur",
+        "manila",
+        "mumbai",
+        "new delhi",
+        "seoul",
+        "shanghai",
+        "singapore",
+        "taipei",
+        "tehran",
+        "tokyo",
+        "yangon",
+    },
+    key=len,
+    reverse=True,
+)
+
+# Regions kept for remote, worldwide, Nigeria-eligible roles outside Africa.
+REMOTE_FOCUS_COUNTRIES: frozenset[str] = frozenset(
+    {
+        # North America
+        "canada",
+        "mexico",
+        "united states",
+        "usa",
+        "u.s.",
+        "us",
+        # Western Europe
+        "austria",
+        "belgium",
+        "denmark",
+        "finland",
+        "france",
+        "germany",
+        "greece",
+        "iceland",
+        "ireland",
+        "italy",
+        "luxembourg",
+        "monaco",
+        "netherlands",
+        "norway",
+        "portugal",
+        "spain",
+        "sweden",
+        "switzerland",
+        "united kingdom",
+        # Oceania (remote worldwide only; on-site still excluded)
+        "australia",
+    }
+)
+
+REMOTE_FOCUS_LOCATION_HINTS: List[str] = sorted(
+    {
+        "athens",
+        "australia",
+        "berlin",
+        "boston",
+        "brussels",
+        "california",
+        "canada",
+        "canberra",
+        "chicago",
+        "copenhagen",
+        "geneva",
+        "germany",
+        "greece",
+        "helsinki",
+        "lisbon",
+        "london",
+        "melbourne",
+        "montreal",
+        "munich",
+        "new york",
+        "oslo",
+        "ottawa",
+        "paris",
+        "portugal",
+        "rome",
+        "stockholm",
+        "sydney",
+        "toronto",
+        "united kingdom",
+        "united states",
+        "usa",
+        "vienna",
+        "washington",
+        "zurich",
+    },
+    key=len,
+    reverse=True,
+)
+
+
+def _flatten_health_keywords_sorted() -> List[str]:
+    """Longer health phrases first so substrings do not steal matches."""
     phrases: List[str] = []
     for items in KEYWORD_PHRASES.values():
         phrases.extend(items)
     return sorted(set(phrases), key=len, reverse=True)
 
 
-ALL_KEYWORDS_SORTED: List[str] = _flatten_keywords_sorted()
+HEALTH_KEYWORDS_SORTED: List[str] = _flatten_health_keywords_sorted()
+TECH_JOB_PHRASES_SORTED: List[str] = sorted(TECH_JOB_PHRASES, key=len, reverse=True)
 
 CLOSING_MS_RE = re.compile(r"var f\w+pi\s*=\s*(\d+)\s*;var f\w+pd\s*=\s*(\d+)")
+
+
+def load_email_settings() -> tuple[str, str, str, str, int]:
+    """
+    Load SMTP settings from the environment.
+
+    Supports ``GMAIL_USER`` / ``GMAIL_APP_PASSWORD`` / ``NOTIFY_TO_EMAIL`` and
+    legacy ``SENDER_EMAIL`` / ``SENDER_PASSWORD`` / ``RECEIVER_EMAIL`` names.
+
+    Returns:
+        Tuple of sender email, app password, recipient, SMTP host, SMTP port.
+    """
+    sender = os.environ.get("GMAIL_USER") or os.environ.get("SENDER_EMAIL", "")
+    password = os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get(
+        "SENDER_PASSWORD", ""
+    )
+    receiver = os.environ.get("NOTIFY_TO_EMAIL") or os.environ.get(
+        "RECEIVER_EMAIL", ""
+    )
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    return sender, password, receiver, smtp_host, smtp_port
 
 
 @dataclass
@@ -427,38 +717,253 @@ def enrich_job_detail(session: requests.Session, job: ParsedJob, timeout: int = 
     job.closing_display = parse_closing_from_detail(page_html)
 
 
-def matches_keyword_matrix(text: str) -> bool:
+def matches_health_keywords(text: str) -> bool:
     """
-    Return True if ``text`` contains any configured keyword phrase (case-insensitive).
+    Return True if ``text`` matches any health-focused keyword (groups A, B, C).
 
     Args:
-        text: Concatenated fields to search.
+        text: Concatenated title, organization, and optional detail body.
 
     Returns:
-        Whether a hit was found in the union of groups A, B, and C.
+        Whether a health-related phrase was found.
     """
     lower = text.lower()
-    for phrase in ALL_KEYWORDS_SORTED:
+    for phrase in HEALTH_KEYWORDS_SORTED:
         if phrase.lower() in lower:
             return True
     return False
 
 
-def passes_nigeria_guardrail(job: ParsedJob) -> bool:
+def is_tech_job(text: str) -> bool:
     """
-    Nigerian eligibility guardrail for locally restricted postings.
-
-    International Professional (P/D) and similar globally advertised posts pass
-    unless the text clearly signals local-only hiring. When ``local
-    recruitment``, ``national officer``, certain national consultant patterns,
-    or explicit ``(NO)`` grades appear, the posting is kept only if the
-    location context indicates **Nigeria** or **remote** / home-based work.
+    Detect generic IT / software postings that are outside the health focus.
 
     Args:
-        job: Parsed row with title, organization, optional detail text.
+        text: Concatenated searchable fields.
 
     Returns:
-        True if the row should be included; False if excluded as local-only abroad.
+        True if the text looks like a software or infrastructure role.
+    """
+    lower = f" {text.lower()} "
+    for phrase in TECH_JOB_PHRASES_SORTED:
+        if phrase.lower() in lower:
+            return True
+    if re.search(r"\bsoftware\b", lower) and re.search(
+        r"\b(engineer|developer|development|consultant)\b", lower
+    ):
+        return True
+    return False
+
+
+def has_allowed_tech_exception(text: str) -> bool:
+    """
+    Allow select tech-adjacent roles the user cares about (AI evaluation, QA).
+
+    Args:
+        text: Concatenated searchable fields.
+
+    Returns:
+        True if AI evaluation or QA engineer phrasing is present.
+    """
+    lower = text.lower()
+    return any(exc in lower for exc in TECH_ALLOWED_EXCEPTIONS)
+
+
+def passes_focus_filter(
+    text: str = "",
+    *,
+    title: str = "",
+    organization: str = "",
+    detail_text: str = "",
+) -> bool:
+    """
+    Health-first filter: drop generic tech jobs unless they mention allowed exceptions.
+
+    Tech detection uses **title and organization only** so long job descriptions on
+    detail pages (which often mention IT systems) do not drop health roles.
+
+    Health keywords are matched in title, organization, and optional detail text.
+
+    Args:
+        text: Legacy single blob (used when title/organization not passed separately).
+        title: Vacancy title from the listing.
+        organization: Organization line from the listing.
+        detail_text: Optional detail-page snippet.
+
+    Returns:
+        Whether the vacancy should continue through the pipeline.
+    """
+    title_org = f"{title} {organization}".strip() or text
+    health_blob = f"{title} {organization} {detail_text}".strip() or text
+
+    if has_allowed_tech_exception(health_blob):
+        return True
+    if is_tech_job(title_org):
+        return False
+    return matches_health_keywords(health_blob)
+
+
+def passes_focus_after_detail(job: ParsedJob) -> bool:
+    """
+    Re-check a listing match after detail enrichment without false tech drops.
+
+    Rows already matched on the listing are kept unless the title/organization
+    is clearly a tech role. Detail text may add keyword matches but must not
+    trigger tech exclusion.
+
+    Args:
+        job: Parsed row with optional ``detail_text``.
+
+    Returns:
+        Whether the row should remain in the candidate set.
+    """
+    title_org = f"{job.title} {job.organization}"
+    if has_allowed_tech_exception(title_org) or has_allowed_tech_exception(
+        job.detail_text or ""
+    ):
+        return True
+    if is_tech_job(title_org):
+        return False
+    health_blob = f"{title_org} {job.detail_text or ''}"
+    return matches_health_keywords(health_blob) or matches_health_keywords(title_org)
+
+
+def is_remote_work(text: str) -> bool:
+    """
+    Detect remote or home-based work arrangements.
+
+    Args:
+        text: Concatenated title, organization, and detail fields.
+
+    Returns:
+        True when the posting is explicitly remote or home-based.
+    """
+    lower = text.lower()
+    return (
+        re.search(r"\bremote\b", lower) is not None
+        or "home-based" in lower
+        or "home based" in lower
+        or "work from home" in lower
+        or "telework" in lower
+        or "telecommute" in lower
+    )
+
+
+def extract_country_from_title(title: str) -> str:
+    """
+    Parse the trailing country from a UNjobs title line (``City, Country``).
+
+    Args:
+        title: Full vacancy title from the listing.
+
+    Returns:
+        Lowercased country string, or empty if not parseable.
+    """
+    if "," not in title:
+        return ""
+    return title.rsplit(",", 1)[-1].strip().lower()
+
+
+def _job_location_blob(job: ParsedJob) -> str:
+    """Lowercased title plus optional detail text for location matching."""
+    return f"{job.title} {job.detail_text or ''}".lower()
+
+
+def _country_in_set(country: str, allowed: frozenset[str]) -> bool:
+    """Match a parsed country name against a region set (exact or substring)."""
+    if not country:
+        return False
+    normalized = country.strip().lower()
+    if normalized in allowed:
+        return True
+    return any(name in normalized for name in allowed if len(name) > 4)
+
+
+def _blob_has_hint(blob: str, hints: List[str]) -> bool:
+    """Return True if any location hint appears in the blob (longest first)."""
+    return any(hint in blob for hint in hints)
+
+
+def is_african_country(country: str) -> bool:
+    """
+    Return whether a parsed country name is treated as an African duty station.
+
+    Args:
+        country: Lowercased country from the title tail.
+
+    Returns:
+        True if the country is in the African allowlist.
+    """
+    return _country_in_set(country, AFRICAN_COUNTRIES)
+
+
+def is_asian_location(job: ParsedJob) -> bool:
+    """
+    Detect Asian duty stations (always excluded from the digest).
+
+    Args:
+        job: Parsed vacancy row.
+
+    Returns:
+        True when the posting is clearly based in Asia.
+    """
+    country = extract_country_from_title(job.title)
+    if _country_in_set(country, ASIAN_COUNTRIES):
+        return True
+    blob = _job_location_blob(job)
+    return _blob_has_hint(blob, ASIAN_LOCATION_HINTS)
+
+
+def is_african_location(job: ParsedJob) -> bool:
+    """
+    Detect African duty stations.
+
+    Args:
+        job: Parsed vacancy row.
+
+    Returns:
+        True when the posting is clearly based in Africa.
+    """
+    country = extract_country_from_title(job.title)
+    if country and is_african_country(country):
+        return True
+    blob = _job_location_blob(job)
+    africa_hints = ("nigeria", "kenya", "ethiopia", "senegal", "uganda", "angola", "ghana")
+    return any(hint in blob for hint in africa_hints)
+
+
+def is_remote_focus_location(job: ParsedJob) -> bool:
+    """
+    Detect remote-focus regions outside Africa (NA, Western Europe, Australia).
+
+    Greece, Portugal, and Australia are included here. Such postings are only
+    kept when also remote/home-based and Nigeria-eligible.
+
+    Args:
+        job: Parsed vacancy row.
+
+    Returns:
+        True when the posting is tied to an allowed remote-focus region.
+    """
+    country = extract_country_from_title(job.title)
+    if _country_in_set(country, REMOTE_FOCUS_COUNTRIES):
+        return True
+    return _blob_has_hint(_job_location_blob(job), REMOTE_FOCUS_LOCATION_HINTS)
+
+
+def is_international_job(job: ParsedJob) -> bool:
+    """
+    Detect internationally recruited UN/ agency posts (not local/national streams).
+
+    Used for all **Africa** and **Nigeria** duty stations: only international
+    grades and contracts pass (P/D, international consultant, etc.). Excludes
+    national consultant, national officer, NO, GS, SSA, and local recruitment.
+
+    Args:
+        job: Parsed vacancy row.
+
+    Returns:
+        True when the vacancy is clearly internationally recruited.
     """
     title_lower = job.title.lower()
     combined = " ".join(
@@ -467,33 +972,169 @@ def passes_nigeria_guardrail(job: ParsedJob) -> bool:
         if fragment
     ).lower()
 
+    if "national consultant" in title_lower and "international" not in title_lower:
+        return False
+
+    if "national officer" in combined:
+        return False
+
+    if re.search(r"\(no\)", title_lower):
+        return False
+
+    if re.search(r"\(gs\)|\(g[1-7]\)", title_lower):
+        return False
+
+    if re.search(r"\(ssa\)", title_lower):
+        return False
+
+    if "local recruitment" in combined:
+        return False
+
+    if re.search(r"\bnationals of\b", combined) and "international" not in combined:
+        return False
+
+    if re.search(r"\b(p[1-5]|d[1-2])\b", combined) or re.search(r"\([pd][1-5]\)", combined):
+        return True
+
+    if "international consultant" in combined:
+        return True
+
+    if "consultant" in combined and "national consultant" not in combined:
+        return True
+
+    if "international professional" in combined:
+        return True
+
+    if "international recruitment" in combined:
+        return True
+
+    if "full competitive recruitment : yes" in combined:
+        return True
+
+    return False
+
+
+def is_nigeria_eligible(job: ParsedJob) -> bool:
+    """
+    Estimate whether a Nigerian applicant can apply (international or Nigeria-based).
+
+    Blocks explicit local-only patterns. International grades (P/D), most
+    consultants, and remote roles without a local-recruitment lock are treated
+    as eligible.
+
+    Args:
+        job: Parsed vacancy row.
+
+    Returns:
+        True when Nigerian eligibility is plausible; False when clearly excluded.
+    """
+    title_lower = job.title.lower()
+    combined = " ".join(
+        fragment
+        for fragment in (job.title, job.organization, job.detail_text or "")
+        if fragment
+    ).lower()
+
+    if "nigeria" in combined:
+        return True
+
     national_consultant_local = (
         "national consultant" in title_lower and "international" not in title_lower
     )
+    if national_consultant_local:
+        return False
 
-    needs_local_gate = (
-        "local recruitment" in combined
-        or "national officer" in combined
-        or national_consultant_local
-        or re.search(r"\(no\)", title_lower) is not None
-    )
+    if "national officer" in combined and "nigeria" not in combined:
+        return False
 
-    if not needs_local_gate:
+    if re.search(r"\(no\)", title_lower) and "nigeria" not in combined:
+        return False
+
+    if "local recruitment" in combined and not is_remote_work(combined):
+        return False
+
+    if re.search(r"\bnationals of\b", combined) and "nigeria" not in combined:
+        return False
+
+    if re.search(r"\b(p[1-5]|d[1-2])\b", title_lower) or re.search(
+        r"\([pd][1-5]\)", title_lower
+    ):
         return True
 
-    location_blob = (job.title + " " + (job.detail_text or "")).lower()
-
-    ok_place = (
-        "nigeria" in location_blob
-        or re.search(r"\bremote\b", location_blob) is not None
-        or "home-based" in location_blob
-        or "home based" in location_blob
-    )
-
-    if ok_place:
+    if "international consultant" in title_lower:
         return True
 
-    logger.info("Guardrail excluded (local/NO-style, not Nigeria/remote): %s", job.title)
+    if "consultant" in title_lower and "national consultant" not in title_lower:
+        return True
+
+    if "international professional" in combined or "full competitive recruitment" in combined:
+        return True
+
+    if is_remote_work(combined):
+        return "local recruitment" not in combined
+
+    return True
+
+
+def passes_nigeria_guardrail(job: ParsedJob) -> bool:
+    """
+    Location and Nigerian eligibility guardrail.
+
+    - **Asia:** always discarded.
+    - **Africa / Nigeria:** only **international** posts (P/D, international
+      consultant, etc.); national/local/SSA/GS roles are excluded.
+    - **Remote-focus regions** (North America, Western Europe, Greece, Portugal,
+      Australia): kept only when **remote/home-based** and **Nigeria-eligible**.
+    - **All other regions** (Latin America, Eastern Europe, Middle East, Fiji,
+      on-site posts outside Africa/Australia remote-focus): discarded.
+
+    Args:
+        job: Parsed row with title, organization, optional detail text.
+
+    Returns:
+        True if the row should be included; False if excluded by location rules.
+    """
+    combined = " ".join(
+        fragment
+        for fragment in (job.title, job.organization, job.detail_text or "")
+        if fragment
+    )
+
+    if is_asian_location(job):
+        logger.info("Guardrail excluded (Asian duty station): %s", job.title)
+        return False
+
+    location_blob = _job_location_blob(job)
+    in_africa_or_nigeria = is_african_location(job) or "nigeria" in location_blob
+
+    if in_africa_or_nigeria:
+        if is_international_job(job):
+            return True
+        logger.info(
+            "Guardrail excluded (Africa/Nigeria, not international): %s",
+            job.title,
+        )
+        return False
+
+    if is_remote_focus_location(job):
+        if not is_remote_work(combined):
+            logger.info(
+                "Guardrail excluded (remote-focus region, on-site): %s",
+                job.title,
+            )
+            return False
+        if not is_nigeria_eligible(job):
+            logger.info(
+                "Guardrail excluded (remote-focus region, Nigeria not eligible): %s",
+                job.title,
+            )
+            return False
+        return True
+
+    logger.info(
+        "Guardrail excluded (outside Africa; not remote-focus region): %s",
+        job.title,
+    )
     return False
 
 
@@ -649,19 +1290,19 @@ def run_pipeline(
         Exit code (0 success).
     """
     load_dotenv()
-    sender = os.environ.get("SENDER_EMAIL", "")
-    password = os.environ.get("SENDER_PASSWORD", "")
-    receiver = os.environ.get("RECEIVER_EMAIL", "")
-    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    sender, password, receiver, smtp_host, smtp_port = load_email_settings()
 
     start_url = fix_legacy_latest_listing_url(start_url)
 
     session = requests.Session()
     all_jobs = scrape_listings(session, start_url, max_pages, delay)
 
-    list_matches = [job for job in all_jobs if matches_keyword_matrix(f"{job.title} {job.organization}")]
-    logger.info("Keyword matches on listing text: %s", len(list_matches))
+    list_matches = [
+        job
+        for job in all_jobs
+        if passes_focus_filter(f"{job.title} {job.organization}")
+    ]
+    logger.info("Health/focus matches on listing text: %s", len(list_matches))
 
     detail_used = 0
     for job in list_matches:
@@ -675,16 +1316,19 @@ def run_pipeline(
         detail_used += 1
         time.sleep(delay)
 
-    full_text_matches: List[ParsedJob] = []
-    for job in list_matches:
-        blob = f"{job.title} {job.organization} {job.detail_text or ''}"
-        if matches_keyword_matrix(blob):
-            full_text_matches.append(job)
-
-    logger.info("Keyword matches after detail text: %s", len(full_text_matches))
+    full_text_matches: List[ParsedJob] = [
+        job for job in list_matches if passes_focus_after_detail(job)
+    ]
+    dropped_after_detail = len(list_matches) - len(full_text_matches)
+    if dropped_after_detail:
+        logger.info(
+            "Dropped %s listing match(es) after detail (tech in title/org only)",
+            dropped_after_detail,
+        )
+    logger.info("Health/focus matches after detail text: %s", len(full_text_matches))
 
     gated = [job for job in full_text_matches if passes_nigeria_guardrail(job)]
-    logger.info("Rows after Nigerian eligibility guardrail: %s", len(gated))
+    logger.info("Rows after eligibility guardrail: %s", len(gated))
 
     state = load_state(state_path)
     if force_resend:
@@ -695,8 +1339,23 @@ def run_pipeline(
     logger.info("New vacancies (not in state file): %s", len(fresh_jobs))
 
     if dry_run:
-        for job in fresh_jobs:
-            print(f"{job.title}\n  {job.url}\n  {job.organization}\n")
+        if fresh_jobs:
+            print(f"\n--- {len(fresh_jobs)} new match(es) for digest ---\n")
+            for job in fresh_jobs:
+                print(f"{job.title}\n  {job.url}\n  {job.organization}\n")
+        else:
+            print("\n--- No new matches in this run ---\n")
+            print(
+                f"Pipeline: scraped={len(all_jobs)}, "
+                f"health_listing={len(list_matches)}, "
+                f"after_detail={len(full_text_matches)}, "
+                f"after_guardrail={len(gated)}, "
+                f"new_vs_state={len(fresh_jobs)}"
+            )
+            if full_text_matches and not gated:
+                print("\nMatched health filters but excluded by location/eligibility:\n")
+                for job in full_text_matches:
+                    print(f"  - {job.title}")
         return 0
 
     if not fresh_jobs:
@@ -704,7 +1363,10 @@ def run_pipeline(
         return 0
 
     if not sender or not password or not receiver:
-        logger.error("Set SENDER_EMAIL, SENDER_PASSWORD, and RECEIVER_EMAIL for email delivery.")
+        logger.error(
+            "Set GMAIL_USER, GMAIL_APP_PASSWORD, and NOTIFY_TO_EMAIL "
+            "(or SENDER_EMAIL / SENDER_PASSWORD / RECEIVER_EMAIL) for email delivery."
+        )
         return 1
 
     try:
@@ -736,7 +1398,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=int(os.environ.get("MAX_PAGES", "3")),
+        default=int(os.environ.get("MAX_PAGES", "6")),
         help="Maximum listing pages to fetch.",
     )
     parser.add_argument(

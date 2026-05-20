@@ -41,9 +41,14 @@ jobs:
 
       - name: Run digest
         env:
+          # Primary names (match .env.example)
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_TO_EMAIL: ${{ secrets.NOTIFY_TO_EMAIL }}
+          # Legacy aliases (older script on main used these names)
+          SENDER_EMAIL: ${{ secrets.GMAIL_USER }}
+          SENDER_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.NOTIFY_TO_EMAIL }}
           SMTP_HOST: smtp.gmail.com
           SMTP_PORT: "587"
           UNJOBS_URL: https://unjobs.org/new
