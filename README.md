@@ -69,11 +69,13 @@ source .venv/bin/activate
 python scripts/unjobs_daily_digest.py --dry-run
 ```
 
-Normal run (email only **new** vacancies since last run):
+Normal run (emails each **new** match **as soon as it qualifies**, page by page — does not wait for all 20 pages to finish):
 
 ```bash
 python scripts/unjobs_daily_digest.py
 ```
+
+You may receive **one email per vacancy** during a run when multiple new jobs match.
 
 ## 5. Listing URL note
 

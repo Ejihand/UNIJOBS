@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
@@ -607,6 +607,53 @@ def fix_legacy_latest_listing_url(url: str) -> str:
     return fixed
 
 
+def iter_listing_pages(
+    session: requests.Session,
+    start_url: str,
+    max_pages: int,
+    delay: float,
+) -> Iterator[Tuple[int, List[ParsedJob]]]:
+    """
+    Yield listing pages one at a time with deduplicated jobs per page.
+
+    Args:
+        session: HTTP session.
+        start_url: First-page listing URL.
+        max_pages: Maximum number of pages (each ~25 rows on UNjobs).
+        delay: Politeness delay between successful page fetches.
+
+    Yields:
+        ``(page_number, jobs_on_page)`` for each page that has new vacancy URLs.
+    """
+    seen_urls: Set[str] = set()
+    for page in range(1, max_pages + 1):
+        url = listing_page_url(start_url, page)
+        logger.info("Fetching listing page %s: %s", page, url)
+        try:
+            listing_html = fetch_html(session, url)
+        except Exception:
+            logger.exception("Failed to fetch listing page; stopping pagination.")
+            break
+
+        rows = parse_listing_html(listing_html, url)
+        if not rows:
+            logger.info("No job rows on page %s; stopping.", page)
+            break
+
+        page_jobs: List[ParsedJob] = []
+        for row in rows:
+            if row.url not in seen_urls:
+                seen_urls.add(row.url)
+                page_jobs.append(row)
+
+        if not page_jobs:
+            logger.info("No new unique rows on page %s; stopping pagination.", page)
+            break
+
+        yield page, page_jobs
+        time.sleep(delay)
+
+
 def scrape_listings(
     session: requests.Session,
     start_url: str,
@@ -625,34 +672,10 @@ def scrape_listings(
     Returns:
         Deduplicated list of parsed jobs (by vacancy URL).
     """
-    all_rows: Dict[str, ParsedJob] = {}
-    for page in range(1, max_pages + 1):
-        url = listing_page_url(start_url, page)
-        logger.info("Fetching listing page %s: %s", page, url)
-        try:
-            listing_html = fetch_html(session, url)
-        except Exception:
-            logger.exception("Failed to fetch listing page; stopping pagination.")
-            break
-
-        rows = parse_listing_html(listing_html, url)
-        if not rows:
-            logger.info("No job rows on page %s; stopping.", page)
-            break
-
-        new_in_page = 0
-        for row in rows:
-            if row.url not in all_rows:
-                all_rows[row.url] = row
-                new_in_page += 1
-
-        if new_in_page == 0:
-            logger.info("No new unique rows on page %s; stopping pagination.", page)
-            break
-
-        time.sleep(delay)
-
-    return list(all_rows.values())
+    all_rows: List[ParsedJob] = []
+    for _, page_jobs in iter_listing_pages(session, start_url, max_pages, delay):
+        all_rows.extend(page_jobs)
+    return all_rows
 
 
 def parse_closing_from_detail(page_html: str) -> Optional[str]:
@@ -1273,6 +1296,85 @@ def send_html_email(
         raise
 
 
+def process_job_incremental(
+    job: ParsedJob,
+    *,
+    session: requests.Session,
+    state: Dict[str, Any],
+    state_path: Path,
+    detail_fetch_count: int,
+    max_detail_fetches: int,
+    delay: float,
+    sender: str,
+    password: str,
+    receiver: str,
+    smtp_host: str,
+    smtp_port: int,
+    dry_run: bool,
+    force_resend: bool,
+) -> Tuple[str, int]:
+    """
+    Evaluate one vacancy and email immediately if it qualifies.
+
+    Args:
+        job: Parsed listing row.
+        session: HTTP session for optional detail fetch.
+        state: In-memory map of already-emailed URLs (mutated when email sends).
+        state_path: Path to persist state after each successful send.
+        detail_fetch_count: Detail pages fetched so far this run.
+        max_detail_fetches: Cap on detail fetches per run.
+        delay: Delay after each detail fetch.
+        sender: SMTP sender address.
+        password: SMTP password or app password.
+        receiver: Recipient address.
+        smtp_host: SMTP hostname.
+        smtp_port: SMTP port.
+        dry_run: If True, log/print only; do not send mail or update state.
+        force_resend: If True, ignore prior state entries.
+
+    Returns:
+        Tuple of outcome label (``emailed``, ``dry_run``, ``skipped_seen``,
+        ``rejected``) and updated ``detail_fetch_count``.
+    """
+    if not passes_focus_filter(title=job.title, organization=job.organization):
+        return "rejected", detail_fetch_count
+
+    if detail_fetch_count < max_detail_fetches:
+        enrich_job_detail(session, job)
+        detail_fetch_count += 1
+        time.sleep(delay)
+    elif job.detail_text is None:
+        logger.debug(
+            "Detail cap reached; evaluating %s from listing text only",
+            job.url,
+        )
+
+    if not passes_focus_after_detail(job):
+        return "rejected", detail_fetch_count
+
+    if not passes_nigeria_guardrail(job):
+        return "rejected", detail_fetch_count
+
+    if not force_resend and job.url in state:
+        return "skipped_seen", detail_fetch_count
+
+    if dry_run:
+        print(f"{job.title}\n  {job.url}\n  {job.organization}\n")
+        return "dry_run", detail_fetch_count
+
+    try:
+        send_html_email([job], sender, receiver, password, smtp_host, smtp_port)
+    except Exception:
+        logger.exception("Failed to send email for %s", job.url)
+        raise
+
+    now = datetime.now(timezone.utc).isoformat()
+    state[job.url] = {"first_seen": now}
+    save_state(state_path, state)
+    logger.info("Emailed immediately: %s", job.title)
+    return "emailed", detail_fetch_count
+
+
 def run_pipeline(
     *,
     dry_run: bool,
@@ -1284,7 +1386,9 @@ def run_pipeline(
     force_resend: bool,
 ) -> int:
     """
-    Execute scrape, filter, optional mail, and state update.
+    Scrape page-by-page and email each new match as soon as it qualifies.
+
+    Does not wait for all pages to finish before sending notifications.
 
     Returns:
         Exit code (0 success).
@@ -1294,92 +1398,87 @@ def run_pipeline(
 
     start_url = fix_legacy_latest_listing_url(start_url)
 
-    session = requests.Session()
-    all_jobs = scrape_listings(session, start_url, max_pages, delay)
-
-    list_matches = [
-        job
-        for job in all_jobs
-        if passes_focus_filter(f"{job.title} {job.organization}")
-    ]
-    logger.info("Health/focus matches on listing text: %s", len(list_matches))
-
-    detail_used = 0
-    for job in list_matches:
-        if detail_used >= max_detail_fetches:
-            logger.warning(
-                "Reached MAX_DETAIL_FETCHES (%s); remaining rows skip detail enrichment.",
-                max_detail_fetches,
-            )
-            break
-        enrich_job_detail(session, job)
-        detail_used += 1
-        time.sleep(delay)
-
-    full_text_matches: List[ParsedJob] = [
-        job for job in list_matches if passes_focus_after_detail(job)
-    ]
-    dropped_after_detail = len(list_matches) - len(full_text_matches)
-    if dropped_after_detail:
-        logger.info(
-            "Dropped %s listing match(es) after detail (tech in title/org only)",
-            dropped_after_detail,
-        )
-    logger.info("Health/focus matches after detail text: %s", len(full_text_matches))
-
-    gated = [job for job in full_text_matches if passes_nigeria_guardrail(job)]
-    logger.info("Rows after eligibility guardrail: %s", len(gated))
-
-    state = load_state(state_path)
-    if force_resend:
-        fresh_jobs = gated
-    else:
-        fresh_jobs = [job for job in gated if job.url not in state]
-
-    logger.info("New vacancies (not in state file): %s", len(fresh_jobs))
-
-    if dry_run:
-        if fresh_jobs:
-            print(f"\n--- {len(fresh_jobs)} new match(es) for digest ---\n")
-            for job in fresh_jobs:
-                print(f"{job.title}\n  {job.url}\n  {job.organization}\n")
-        else:
-            print("\n--- No new matches in this run ---\n")
-            print(
-                f"Pipeline: scraped={len(all_jobs)}, "
-                f"health_listing={len(list_matches)}, "
-                f"after_detail={len(full_text_matches)}, "
-                f"after_guardrail={len(gated)}, "
-                f"new_vs_state={len(fresh_jobs)}"
-            )
-            if full_text_matches and not gated:
-                print("\nMatched health filters but excluded by location/eligibility:\n")
-                for job in full_text_matches:
-                    print(f"  - {job.title}")
-        return 0
-
-    if not fresh_jobs:
-        logger.info("Nothing new to email.")
-        return 0
-
-    if not sender or not password or not receiver:
+    if not dry_run and (not sender or not password or not receiver):
         logger.error(
             "Set GMAIL_USER, GMAIL_APP_PASSWORD, and NOTIFY_TO_EMAIL "
             "(or SENDER_EMAIL / SENDER_PASSWORD / RECEIVER_EMAIL) for email delivery."
         )
         return 1
 
-    try:
-        send_html_email(fresh_jobs, sender, receiver, password, smtp_host, smtp_port)
-    except Exception:
-        logger.exception("Failed to send email; state file not updated.")
-        return 1
+    session = requests.Session()
+    state = load_state(state_path)
 
-    now = datetime.now(timezone.utc).isoformat()
-    for job in fresh_jobs:
-        state[job.url] = {"first_seen": now}
-    save_state(state_path, state)
-    return 0
+    total_scraped = 0
+    emailed = 0
+    dry_run_matches = 0
+    skipped_seen = 0
+    rejected = 0
+    detail_fetch_count = 0
+    email_failures = 0
+
+    for page_num, page_jobs in iter_listing_pages(session, start_url, max_pages, delay):
+        total_scraped += len(page_jobs)
+        logger.info("Processing %s job(s) from page %s", len(page_jobs), page_num)
+
+        for job in page_jobs:
+            try:
+                outcome, detail_fetch_count = process_job_incremental(
+                    job,
+                    session=session,
+                    state=state,
+                    state_path=state_path,
+                    detail_fetch_count=detail_fetch_count,
+                    max_detail_fetches=max_detail_fetches,
+                    delay=delay,
+                    sender=sender,
+                    password=password,
+                    receiver=receiver,
+                    smtp_host=smtp_host,
+                    smtp_port=smtp_port,
+                    dry_run=dry_run,
+                    force_resend=force_resend,
+                )
+            except Exception:
+                email_failures += 1
+                continue
+
+            if outcome == "emailed":
+                emailed += 1
+            elif outcome == "dry_run":
+                dry_run_matches += 1
+            elif outcome == "skipped_seen":
+                skipped_seen += 1
+            else:
+                rejected += 1
+
+        if detail_fetch_count >= max_detail_fetches:
+            logger.warning(
+                "Reached MAX_DETAIL_FETCHES (%s); further rows use listing text only.",
+                max_detail_fetches,
+            )
+
+    logger.info(
+        "Run complete: scraped=%s, emailed=%s, dry_run=%s, skipped_seen=%s, "
+        "rejected=%s, email_failures=%s",
+        total_scraped,
+        emailed,
+        dry_run_matches,
+        skipped_seen,
+        rejected,
+        email_failures,
+    )
+
+    if dry_run and dry_run_matches == 0:
+        print("\n--- No new matches in this run ---\n")
+        print(
+            f"Pipeline: scraped={total_scraped}, "
+            f"would_email={dry_run_matches}, skipped_seen={skipped_seen}, rejected={rejected}"
+        )
+
+    if not dry_run and emailed == 0 and email_failures == 0:
+        logger.info("Nothing new to email.")
+
+    return 1 if email_failures else 0
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
