@@ -1,0 +1,52 @@
+name: Daily UNjobs digest
+
+on:
+  schedule:
+    # 06:00 UTC daily (~07:00 WAT). Adjust in GitHub if you prefer another time.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: unjobs-digest
+  cancel-in-progress: false
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore seen-jobs state
+        uses: actions/cache@v4
+        with:
+          path: data/seen_jobs.json
+          key: unjobs-seen-state-v1-${{ github.repository }}
+
+      - name: Prepare data directory
+        run: mkdir -p data
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run digest
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO_EMAIL: ${{ secrets.NOTIFY_TO_EMAIL }}
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: "587"
+          UNJOBS_URL: https://unjobs.org/new
+          MAX_PAGES: "6"
+          MAX_DETAIL_FETCHES: "50"
+          REQUEST_DELAY_SECONDS: "0.5"
+          STATE_PATH: data/seen_jobs.json
+        run: python scripts/unjobs_daily_digest.py
