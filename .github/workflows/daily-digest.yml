@@ -12,6 +12,9 @@ concurrency:
   group: unjobs-digest
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   send-digest:
     runs-on: ubuntu-latest
@@ -27,25 +30,17 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Restore seen-jobs state
-        uses: actions/cache@v4
-        with:
-          path: data/seen_jobs.json
-          key: unjobs-seen-state-v1-${{ github.repository }}
-
       - name: Prepare data directory
-        run: mkdir -p data
+        run: mkdir -p data && test -f data/seen_jobs.json || echo '{}' > data/seen_jobs.json
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run digest
         env:
-          # Primary names (match .env.example)
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_TO_EMAIL: ${{ secrets.NOTIFY_TO_EMAIL }}
-          # Legacy aliases (older script on main used these names)
           SENDER_EMAIL: ${{ secrets.GMAIL_USER }}
           SENDER_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECEIVER_EMAIL: ${{ secrets.NOTIFY_TO_EMAIL }}
@@ -57,3 +52,15 @@ jobs:
           REQUEST_DELAY_SECONDS: "0.5"
           STATE_PATH: data/seen_jobs.json
         run: python scripts/unjobs_daily_digest.py
+
+      - name: Commit seen-jobs state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/seen_jobs.json
+          if git diff --staged --quiet; then
+            echo "No state changes to commit."
+          else
+            git commit -m "chore: update seen UNjobs vacancies [skip ci]"
+            git push
+          fi

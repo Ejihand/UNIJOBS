@@ -1161,6 +1161,53 @@ def passes_nigeria_guardrail(job: ParsedJob) -> bool:
     return False
 
 
+def normalize_title_key(title: str) -> str:
+    """
+    Build a stable fingerprint from the vacancy title for deduplication.
+
+    Args:
+        title: Raw job title from UNjobs.
+
+    Returns:
+        Normalized lowercase string used to detect repeat postings.
+    """
+    collapsed = re.sub(r"\s+", " ", title.lower().strip())
+    return collapsed[:240]
+
+
+def is_job_already_seen(
+    state: Dict[str, Any],
+    job: ParsedJob,
+    run_seen_urls: Set[str],
+    run_seen_titles: Set[str],
+) -> bool:
+    """
+    Return True if this vacancy was already emailed in state or earlier this run.
+
+    Args:
+        state: Persisted URL map from ``seen_jobs.json``.
+        job: Candidate vacancy.
+        run_seen_urls: URLs already emailed during the current run.
+        run_seen_titles: Title fingerprints already emailed this run.
+
+    Returns:
+        Whether to skip sending again.
+    """
+    if job.url in run_seen_urls or job.url in state:
+        return True
+
+    title_key = normalize_title_key(job.title)
+    if title_key in run_seen_titles:
+        return True
+
+    for entry in state.values():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("title_key") == title_key:
+            return True
+    return False
+
+
 def load_state(path: Path) -> Dict[str, Any]:
     """
     Load the deduplication map from disk.
@@ -1302,6 +1349,8 @@ def process_job_incremental(
     session: requests.Session,
     state: Dict[str, Any],
     state_path: Path,
+    run_seen_urls: Set[str],
+    run_seen_titles: Set[str],
     detail_fetch_count: int,
     max_detail_fetches: int,
     delay: float,
@@ -1355,7 +1404,10 @@ def process_job_incremental(
     if not passes_nigeria_guardrail(job):
         return "rejected", detail_fetch_count
 
-    if not force_resend and job.url in state:
+    if not force_resend and is_job_already_seen(
+        state, job, run_seen_urls, run_seen_titles
+    ):
+        logger.info("Skipping duplicate (already notified): %s", job.title)
         return "skipped_seen", detail_fetch_count
 
     if dry_run:
@@ -1369,7 +1421,10 @@ def process_job_incremental(
         raise
 
     now = datetime.now(timezone.utc).isoformat()
-    state[job.url] = {"first_seen": now}
+    title_key = normalize_title_key(job.title)
+    state[job.url] = {"first_seen": now, "title_key": title_key}
+    run_seen_urls.add(job.url)
+    run_seen_titles.add(title_key)
     save_state(state_path, state)
     logger.info("Emailed immediately: %s", job.title)
     return "emailed", detail_fetch_count
@@ -1407,6 +1462,8 @@ def run_pipeline(
 
     session = requests.Session()
     state = load_state(state_path)
+    run_seen_urls: Set[str] = set()
+    run_seen_titles: Set[str] = set()
 
     total_scraped = 0
     emailed = 0
@@ -1427,6 +1484,8 @@ def run_pipeline(
                     session=session,
                     state=state,
                     state_path=state_path,
+                    run_seen_urls=run_seen_urls,
+                    run_seen_titles=run_seen_titles,
                     detail_fetch_count=detail_fetch_count,
                     max_detail_fetches=max_detail_fetches,
                     delay=delay,

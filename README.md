@@ -108,9 +108,14 @@ Two workflows live under [`.github/workflows/`](.github/workflows/):
 3. Enable Actions: **Actions** tab → allow workflows if prompted.
 4. Test manually: **Actions → Daily UNjobs digest → Run workflow**.
 
-### How state is stored in CI
+### How duplicate emails are prevented
 
-`data/seen_jobs.json` is **not** committed. The daily workflow uses [Actions cache](https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows) so repeat runs do not re-email the same URLs. If the cache is cleared, you may get duplicate digests once.
+`data/seen_jobs.json` is **committed to the repo** after each successful Actions run. Every emailed vacancy is stored by **URL** and **title fingerprint**, so:
+
+- A second run the same day (manual + scheduled) will **not** resend the same job.
+- The old Actions-only cache is no longer used (it was unreliable and caused repeats).
+
+If you still see a duplicate once, it was likely from runs **before** this fix; new duplicates should stop after the next successful workflow.
 
 ### Notes
 
@@ -139,4 +144,4 @@ Some networks or datacenter IPs may receive HTTP 403 from Cloudflare when using 
 
 ## 9. State file
 
-Seen vacancy URLs are stored at `data/seen_jobs.json` by default (see `STATE_PATH`). Delete or edit this file to re-send jobs.
+Seen vacancy URLs are stored at `data/seen_jobs.json` (see `STATE_PATH`). The file is tracked in git so GitHub Actions remembers what was already emailed. Delete a URL entry or edit the file to allow a one-off resend; use `--force-resend` to ignore state for a full rerun.
