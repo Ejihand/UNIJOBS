@@ -1,0 +1,11 @@
+.venv/
+venv/
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+data/seen_jobs.json
+logs/
+*.log
