@@ -90,7 +90,7 @@ Two workflows live under [`.github/workflows/`](.github/workflows/):
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | [`ci.yml`](.github/workflows/ci.yml) | Push / PR to `main` | Install deps, syntax-check the script |
-| [`daily-digest.yml`](.github/workflows/daily-digest.yml) | Daily 06:00 UTC + manual | Scrape, filter, email new jobs |
+| [`daily-digest.yml`](.github/workflows/daily-digest.yml) | Daily **06:00 & 20:00 WAT** + manual | Scrape, filter, email new jobs |
 
 ### One-time setup
 
@@ -112,7 +112,8 @@ Two workflows live under [`.github/workflows/`](.github/workflows/):
 
 ### Notes
 
-- Scheduled cron runs only on the **default branch** and only while the repo has recent activity (GitHub policy).
+- Schedule is **twice daily in WAT (UTC+1):** 06:00 WAT (`05:00 UTC`) and 20:00 WAT / 8pm (`19:00 UTC`). GitHub cron uses UTC only.
+- Scheduled runs execute only on the **default branch** and only while the repo has recent activity (GitHub policy).
 - GitHub-hosted runners use datacenter IPs; UNjobs may occasionally block them (HTTP 403). If that happens, use local cron (below) or re-run the workflow later.
 - **Cost:** public repos get free Action minutes; private repos use your plan’s included minutes (this job is short, typically a few minutes per day).
 
